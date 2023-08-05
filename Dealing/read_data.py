@@ -16,12 +16,27 @@ import pandas as pd
 import numpy as np 
 from enum import Enum
 # from Dealing.deal_args import deal_args
+type_same = [
+    [int, np.int64, np.int32, np.int16,float, np.float64, np.float32, np.float16],
+    [str, np.str, np.str_],
+    [bool, np.bool, np.bool_],
+    [complex, np.complex, np.complex64, np.complex128],
+    [list, np.ndarray],
+    [dict],
+    [tuple],
+    [set],
+]
+def get_is_same_type(type1, type2):
+    for i in range(len(type_same)):
+        if type1 in type_same[i] and type2 in type_same[i]:
+            return True
+    return False
+        
 
 class data_dealer:
     def __init__(self) -> None:
         self.data = None
 
-    
     def read_data_from_path(self, path: str):
         # get file type
         file_type = path.split('.')[-1].lower()
@@ -56,7 +71,7 @@ class data_dealer:
         return report
 
 
-    def process_col(self, col_name : str , deal_type = '', missing_wash = True, missing_method = 'mean', outlier_deal = True, outlier_method = 'mean'):
+    def process_col(self, col_name : str, deal_type, missing_method = 'mean', outlier_method = 'mean'):
         '''
         description: process a column of data
         params:
@@ -78,28 +93,71 @@ class data_dealer:
                 whether to process missing values
             -missing_method: str
                 the method of processing missing values
-                select in
-                [
-                    1. 'mean': fill with mean,
-                    2. 'median': fill with median,
-                    3. 'mode': fill with mode,
-                    4. 'drop': drop the row,
-                    5. #TODO: add more
-                ]
+                select in ['mean','median','mode','drop']
             -outlier_deal: bool
                 whether to process outliers
             -outlier_method: str
                 the method of processing outliers
-                select in
-                [
-                    1. 'mean': fill with mean,
-                    2. 'median': fill with median,
-                    3. 'mode': fill with mode,
-                    4. 'drop': drop the row,
-                    5. #TODO: add more
-                ]
+                select in [ mean, median, mode, drop ]
         return:
             -data: pd.DataFrame
                 the processed data
         '''
-        pass
+        # 1. check if col_name is in data and get the column
+        if col_name not in self.data.columns:
+            raise ValueError(f'column {col_name} not in data')
+        select_data = self.data[col_name]
+        select_data = self.data_wash(select_data, missing_method)
+        select_data = self.deal_outlier(select_data, outlier_method)
+        # 2. data wash
+
+    def data_wash(self, data, row, col_name, use_method):
+        method_dict = {
+            'mean': np.mean,
+            'median': np.median,
+            'mode': np.bincount,
+            'drop': None,
+        }
+        sigma = np.std(data)
+        mean = np.mean(data)
+        select_col_data = data[col_name]
+        if use_method == 'drop':
+            # drop row
+            data = data.drop(row)
+        elif use_method == 'clip':
+            data[col_name] = data[col_name].clip(mean - 3 * sigma, mean + 3 * sigma)
+        else:
+            data[col_name][row] = method_dict[use_method](select_col_data)
+        return data
+    
+    def check_outlier(self):
+        # 1. check nan
+        if self.data == None:
+            raise ValueError('data not loaded')
+        # 2. check if data is a pandas dataframe
+        if not isinstance(self.data, pd.DataFrame):
+            raise ValueError('data should be a pandas dataframe')
+        # 3. check col  
+        total_error = {}
+        for col in self.data.columns:
+            # 3.1 check nan, over 3 sigma, type diff
+            nan_index = []
+            total_type_diff = []
+            over_3sigma = []
+            sigma = np.std(self.data[col])
+            mean = np.mean(self.data[col])
+            range_val = [mean - 3 * sigma, mean + 3 * sigma]
+            main_type = type(self.data[col][0])
+            for i in range(len(self.data[col])):
+                if self.data[col][i] == 'nan':
+                    nan_index.append(i)
+                if self.data[col][i] < range_val[0] or self.data[col][i] > range_val[1]:
+                    over_3sigma.append(i)
+                if not get_is_same_type(main_type, type(self.data[col][i])):
+                    total_type_diff.append(i)    
+            total_error[col] = {
+                'nan_index': nan_index,
+                'over_3sigma': over_3sigma,
+                'total_type_diff': total_type_diff
+            }
+        return total_error
